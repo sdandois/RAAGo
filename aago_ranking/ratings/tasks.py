@@ -107,6 +107,8 @@ def run_ratings_update():
                     'rating_changes': generate_event_ratings(e.pk)}
         for e in events
     }
+
+    # The following is used for graphics only
     for player in Player.objects.all():
         plot_filename = "{}.png".format(player.pk)
         params = [(playerRating.event.end_date.toordinal(), converted_mu(playerRating.mu))
