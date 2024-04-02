@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import, division
+from aago_ranking.games.models import Player, Game
+from aago_ranking.events.models import Event, EventPlayer
+from .models import PlayerRating
 
 import io
 import logging
@@ -8,6 +11,9 @@ import math
 import subprocess
 from . import plotter
 import os
+import pandas as pd
+
+from .trueskill import tttratings
 
 from django.conf import settings
 from django.db.models import Q
@@ -16,9 +22,6 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 
 def generate_event_ratings(event_pk):
-    from aago_ranking.games.models import Player
-    from aago_ranking.events.models import Event, EventPlayer
-    from .models import PlayerRating
     event = Event.objects.get(pk=event_pk)
     is_previous_event = (Q(event__end_date__lt=event.end_date) |
                        (Q(event__end_date=event.end_date) & Q(event__start_date__lt=event.start_date)) |
@@ -97,10 +100,7 @@ def generate_event_ratings(event_pk):
 def converted_mu(x):
     return x + (x<0) - (x>0)
 
-def run_ratings_update():
-    from aago_ranking.games.models import Player
-    from aago_ranking.events.models import Event, EventPlayer
-    from .models import PlayerRating
+def run_ratings_update_cpp():
     events = Event.objects.all()
     ret = {
         str(e.pk): {'name': e.name,
@@ -116,3 +116,56 @@ def run_ratings_update():
         if params:
             plotter.plot_data([p[0] for p in params], [p[1] for p in params] , os.path.join(settings.RAAGO_PLOTS_PATH, plot_filename))
     return ret
+
+
+
+def create_games_dataframe():
+    rated_games_query = (Q(unrated=False))
+    games = Game.objects.filter(rated_games_query).order_by('date')
+    
+    
+    
+    games_list = [
+        (g.pk, g.handicap, g.komi, g.result, g.event.end_date, g.black_player.pk, g.white_player.pk)
+        for g in games
+    ]
+    
+    return pd.DataFrame(games_list, columns=[
+        'id', 'handicap', 'komi','result','date', 'black_player_id', 'white_player_id'
+    ])    
+    
+    
+
+def generate_ttt_ratings():
+    PlayerRating.objects.all().delete()
+    
+    game_df = create_games_dataframe()
+
+    new_ratings, log_evidence, mean_evidence = tttratings.calculate_ttt_ratings(game_df)
+    
+    
+    for _i, row in new_ratings.iterrows():
+        event = Event.objects.filter(end_date=row['date']).first()
+        
+        event.playerrating_set.create(player=Player.objects.get(pk=row['player_id']),
+                                mu=row['mu'],
+                                sigma=row['sigma'], )
+        
+    return log_evidence, mean_evidence
+    
+    
+    
+def run_ratings_update_ttt():
+    log_evidence, mean_evidence = generate_ttt_ratings()
+
+
+
+    return {
+        'message': 'Ratings updated correctly',
+        'log_evidence': log_evidence,
+        'mean_evidence': mean_evidence
+    }
+
+# Change run_ratings_update variable to the desired ratings function
+# run_ratings_update = run_ratings_update_cpp
+run_ratings_update = run_ratings_update_ttt
