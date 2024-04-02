@@ -127,7 +127,7 @@ def calculate_ttt_ratings(df):
     new_ratings["mu"] = new_ratings["mu"].apply(converted_mu)
 
     le = h.log_evidence()
-    mean_evidence = (math.exp(le / h.size),)
+    mean_evidence = math.exp(le / h.size)
 
     return new_ratings, le, mean_evidence
 
